@@ -11,7 +11,7 @@ import Timer from '../components/Timer';
 import ProgressBar from '../components/ProgressBar';
 import PinInput from '../components/PinInput';
 import ViolationBanner from '../components/ViolationBanner';
-import { CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, Send, Eye, EyeOff, User } from 'lucide-react';
+import { CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, Send } from 'lucide-react';
 
 const PHASE = { PRE: 'pre', PIN: 'pin', EXAM: 'exam', SUBMITTING: 'submitting' };
 
@@ -29,6 +29,9 @@ export default function ExamView() {
   const [rollNo, setRollNo] = useState('');
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
+  // BUG FIX #2: Track whether PIN has been verified so the Start button
+  // doesn't re-open the PIN screen on every click (was an infinite loop).
+  const [pinVerified, setPinVerified] = useState(false);
 
   // Exam state
   const [currentQ, setCurrentQ] = useState(0);
@@ -47,6 +50,7 @@ export default function ExamView() {
     return uid;
   })());
 
+  // Load exam and teacher info
   useEffect(() => {
     getDoc(doc(db, 'exams', examId)).then(async snap => {
       if (!snap.exists() || snap.data().status !== 'published') {
@@ -56,7 +60,6 @@ export default function ExamView() {
       }
       const data = { id: snap.id, ...snap.data() };
       setExam(data);
-      // Load teacher info
       if (data.teacher_id) {
         const ts = await getDoc(doc(db, 'teachers', data.teacher_id));
         if (ts.exists()) setTeacher(ts.data());
@@ -69,7 +72,12 @@ export default function ExamView() {
   }, [examId]);
 
   const handleViolation = useCallback((type) => {
-    const msg = { window_blur: 'Window switch detected!', tab_switch: 'Tab switch detected!', right_click: 'Right-click is disabled!', keyboard_shortcut: 'Keyboard shortcut blocked!' }[type] || 'Violation detected!';
+    const msg = {
+      window_blur: 'Window switch detected!',
+      tab_switch: 'Tab switch detected!',
+      right_click: 'Right-click is disabled!',
+      keyboard_shortcut: 'Keyboard shortcut blocked!',
+    }[type] || 'Violation detected!';
     setViolations(v => v + 1);
     setViolationLog(l => [...l, { type, time: new Date().toISOString() }]);
     setViolationMsg(msg);
@@ -87,35 +95,42 @@ export default function ExamView() {
     () => submitExam(true)
   );
 
+  // BUG FIX #8: Wrapped in try/catch — the Firestore one-time access query
+  // previously had no error handling, causing an unhandled rejection on network issues.
   const startExam = async () => {
     if (!studentName.trim()) return setError('Please enter your name.');
-
-    // One-time access check
-    if (exam.one_time_access) {
-      const q = query(
-        collection(db, 'submissions'),
-        where('exam_id', '==', examId),
-        where('student_uid', '==', studentUid.current)
-      );
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        const sub = snap.docs[0];
-        return navigate(`/exam/${examId}/result/${sub.id}`);
+    setError('');
+    try {
+      if (exam.one_time_access) {
+        const q = query(
+          collection(db, 'submissions'),
+          where('exam_id', '==', examId),
+          where('student_uid', '==', studentUid.current)
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          return navigate(`/exam/${examId}/result/${snap.docs[0].id}`);
+        }
       }
+      startTimeRef.current = Date.now();
+      setPhase(PHASE.EXAM);
+      requestFullscreen();
+      if (exam.timed) startTimer();
+    } catch (err) {
+      console.error('Failed to start exam:', err);
+      setError('Could not start exam. Please check your connection and try again.');
     }
-
-    startTimeRef.current = Date.now();
-    setPhase(PHASE.EXAM);
-    requestFullscreen();
-    if (exam.timed) startTimer();
   };
 
+  // BUG FIX #2 (continued): After correct PIN, set pinVerified = true so the
+  // Start button handler skips the PIN screen on subsequent clicks.
   const handlePinSubmit = () => {
     if (pin.replace(/\s/g, '') !== String(exam.pin)) {
       setPinError('Incorrect PIN. Please try again.');
       return;
     }
     setPinError('');
+    setPinVerified(true);
     setPhase(PHASE.PRE);
   };
 
@@ -173,12 +188,7 @@ export default function ExamView() {
       }
 
       score += marksAwarded;
-      return {
-        questionIdx: i,
-        studentAnswer: studentAns,
-        correct,
-        marksAwarded,
-      };
+      return { questionIdx: i, studentAnswer: studentAns, correct, marksAwarded };
     });
 
     const totalMarks = exam.questions.reduce((s, q) => s + (parseFloat(q.marks) || 0), 0);
@@ -221,7 +231,7 @@ export default function ExamView() {
     </div>
   );
 
-  if (error && phase === PHASE.PRE) return (
+  if (error && phase === PHASE.PRE && !exam) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="text-center max-w-sm">
         <AlertTriangle size={40} className="text-red-400 mx-auto mb-4" />
@@ -248,6 +258,17 @@ export default function ExamView() {
         >
           Verify PIN
         </button>
+      </div>
+    </div>
+  );
+
+  // ── Submitting ──
+  if (phase === PHASE.SUBMITTING) return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-center">
+        <div className="w-10 h-10 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-gray-700 font-semibold">Submitting your exam...</p>
+        <p className="text-gray-400 text-sm mt-1">Please don't close this window.</p>
       </div>
     </div>
   );
@@ -284,6 +305,11 @@ export default function ExamView() {
               {exam.one_time_access && (
                 <span className="text-xs font-medium bg-red-50 text-red-600 border border-red-200 px-2.5 py-1 rounded-full">
                   One-time only
+                </span>
+              )}
+              {pinVerified && (
+                <span className="text-xs font-medium bg-teal-50 text-teal-700 border border-teal-200 px-2.5 py-1 rounded-full">
+                  PIN verified
                 </span>
               )}
             </div>
@@ -332,16 +358,19 @@ export default function ExamView() {
             {error && <p className="text-red-500 text-sm">{error}</p>}
 
             <button
-              onClick={() => {
+              onClick={async () => {
                 if (!studentName.trim()) return setError('Please enter your name.');
                 setError('');
-                if (exam.access === 'pin_protected') {
+                // BUG FIX #2: Check pinVerified so we don't re-open the PIN screen
+                // after it has already been verified. Old code always went to PIN for
+                // pin_protected exams, creating an infinite PRE → PIN → PRE loop.
+                if (exam.access === 'pin_protected' && !pinVerified) {
                   setPhase(PHASE.PIN);
                 } else if (exam.one_time_access && !oneTimeWarned) {
                   setOneTimeWarned(true);
-                  startExam();
+                  await startExam();
                 } else {
-                  startExam();
+                  await startExam();
                 }
               }}
               className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3.5 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm"
@@ -350,17 +379,6 @@ export default function ExamView() {
             </button>
           </div>
         </div>
-      </div>
-    </div>
-  );
-
-  // ── Submitting ──
-  if (phase === PHASE.SUBMITTING) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <div className="w-10 h-10 border-2 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-gray-700 font-semibold">Submitting your exam...</p>
-        <p className="text-gray-400 text-sm mt-1">Please don't close this window.</p>
       </div>
     </div>
   );
@@ -398,7 +416,6 @@ export default function ExamView() {
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
         {isOneAtATime ? (
-          /* One question at a time */
           <div className="animate-fade-in">
             <QuestionCard
               q={q} idx={currentQ} total={questions.length}
@@ -432,7 +449,6 @@ export default function ExamView() {
             </div>
           </div>
         ) : (
-          /* All at once */
           <div className="space-y-5">
             {questions.map((question, i) => (
               <QuestionCard
