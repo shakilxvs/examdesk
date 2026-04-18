@@ -1,21 +1,52 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ClipboardList, Clock, Lock, Zap, FileDown, Brain,
-  ArrowRight, BookOpen, CheckCircle
+  ArrowRight, BookOpen, CheckCircle, X, Hash
 } from 'lucide-react';
 import Footer from '../components/Footer';
 
 const FEATURES = [
-  { icon: ClipboardList, title: 'MCQ & Written Exams', desc: 'Build any exam type — multiple choice, written answers, or mix both.' },
-  { icon: Clock,         title: 'Timed or Open',       desc: 'Set a countdown timer or let students take their time.' },
-  { icon: Lock,          title: 'PIN Protection',       desc: 'Secure your exams with a PIN so only your students can enter.' },
-  { icon: Zap,           title: 'Instant Results',      desc: 'Auto-graded results with grade badges the moment students submit.' },
-  { icon: FileDown,      title: 'PDF Reports',          desc: 'Download beautiful A4 result cards and full exam reports.' },
-  { icon: Brain,         title: 'Smart Matching',       desc: 'Handles "50" = "50.0", fractions, spelling variants and more.' },
+  { icon: ClipboardList, title: 'MCQ & Written Exams',  desc: 'Build any exam type — multiple choice, written answers, or mix both.' },
+  { icon: Clock,         title: 'Timed or Open',        desc: 'Set a countdown timer or let students take their time.' },
+  { icon: Lock,          title: 'PIN Protection',        desc: 'Secure your exams with a PIN so only your students can enter.' },
+  { icon: Zap,           title: 'Instant Results',       desc: 'Auto-graded results with grade badges the moment students submit.' },
+  { icon: FileDown,      title: 'PDF Reports',           desc: 'Download beautiful A4 result cards and full exam reports.' },
+  { icon: Brain,         title: 'Smart Matching',        desc: 'Handles "50" = "50.0", fractions, spelling variants and more.' },
 ];
 
 export default function Landing() {
   const navigate = useNavigate();
+  const [showModal, setShowModal] = useState(false);
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+
+  const handleStudentEnter = () => {
+    setCode('');
+    setError('');
+    setShowModal(true);
+  };
+
+  const handleJoin = () => {
+    const trimmed = code.trim();
+    if (!trimmed) {
+      setError('Please enter your exam code or link.');
+      return;
+    }
+    // Accept full URL or just the exam ID
+    const match = trimmed.match(/exam\/([a-zA-Z0-9]+)/);
+    if (match) {
+      navigate('/exam/' + match[1]);
+    } else {
+      navigate('/exam/' + trimmed);
+    }
+    setShowModal(false);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') handleJoin();
+    if (e.key === 'Escape') setShowModal(false);
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -60,14 +91,7 @@ export default function Landing() {
             I'm a Teacher — Get Started <ArrowRight size={17} />
           </button>
           <button
-            onClick={() => {
-              const code = prompt('Enter your exam code or paste the full link:');
-              if (code) {
-                const match = code.match(/exam\/([a-zA-Z0-9]+)/);
-                if (match) navigate(`/exam/${match[1]}`);
-                else navigate(`/exam/${code.trim()}`);
-              }
-            }}
+            onClick={handleStudentEnter}
             className="inline-flex items-center justify-center gap-2 bg-white border border-gray-200 hover:border-gray-300 text-gray-700 font-semibold px-6 py-3.5 rounded-xl transition-colors text-base"
           >
             <ClipboardList size={17} /> I'm a Student — Enter Exam Code
@@ -107,6 +131,81 @@ export default function Landing() {
       </section>
 
       <Footer />
+
+      {/* ── Student Exam Code Modal ── */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in"
+            onClick={() => setShowModal(false)}
+          />
+
+          {/* Modal card */}
+          <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-sm animate-scale-in overflow-hidden">
+            {/* Top accent */}
+            <div className="h-1.5 bg-teal-500" />
+
+            <div className="p-7">
+              {/* Close button */}
+              <button
+                onClick={() => setShowModal(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X size={16} />
+              </button>
+
+              {/* Icon + heading */}
+              <div className="flex flex-col items-center text-center mb-6">
+                <div className="w-14 h-14 bg-teal-50 border-2 border-teal-100 rounded-2xl flex items-center justify-center mb-4">
+                  <Hash size={26} className="text-teal-600" />
+                </div>
+                <h2 className="font-display font-bold text-gray-900 text-xl">Enter Exam Code</h2>
+                <p className="text-sm text-gray-400 mt-1.5 leading-relaxed">
+                  Ask your teacher for the exam code or paste the full exam link below.
+                </p>
+              </div>
+
+              {/* Input */}
+              <div className="mb-2">
+                <input
+                  type="text"
+                  value={code}
+                  onChange={e => { setCode(e.target.value); setError(''); }}
+                  onKeyDown={handleKeyDown}
+                  placeholder="e.g. abc123xyz or full link"
+                  autoFocus
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-sm font-mono focus:border-teal-500 focus:ring-3 focus:ring-teal-100 outline-none transition-all text-center tracking-wider placeholder:font-sans placeholder:tracking-normal"
+                />
+                {error && (
+                  <p className="text-red-500 text-xs mt-2 text-center">{error}</p>
+                )}
+              </div>
+
+              {/* Hint */}
+              <p className="text-xs text-gray-400 text-center mb-5">
+                Codes look like: <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">xK9mPqR2</span>
+              </p>
+
+              {/* Buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleJoin}
+                  className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  Start Exam <ArrowRight size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
