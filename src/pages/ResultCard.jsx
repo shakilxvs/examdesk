@@ -24,19 +24,32 @@ export default function ResultCard() {
 
   useEffect(() => {
     (async () => {
-      const subSnap = await getDoc(doc(db, 'submissions', submissionId));
-      if (!subSnap.exists()) { setLoading(false); return; }
-      const sub = { id: subSnap.id, ...subSnap.data() };
-      setSubmission(sub);
+      try {
+        const subSnap = await getDoc(doc(db, 'submissions', submissionId));
+        if (!subSnap.exists()) return;
+        const sub = { id: subSnap.id, ...subSnap.data() };
+        setSubmission(sub);
 
-      const examSnap = await getDoc(doc(db, 'exams', sub.exam_id));
-      if (examSnap.exists()) {
-        const examData = { id: examSnap.id, ...examSnap.data() };
-        setExam(examData);
-        const tSnap = await getDoc(doc(db, 'teachers', examData.teacher_id));
-        if (tSnap.exists()) setTeacher(tSnap.data());
+        try {
+          const examSnap = await getDoc(doc(db, 'exams', sub.exam_id));
+          if (examSnap.exists()) {
+            const examData = { id: examSnap.id, ...examSnap.data() };
+            setExam(examData);
+            try {
+              const tSnap = await getDoc(doc(db, 'teachers', examData.teacher_id));
+              if (tSnap.exists()) setTeacher(tSnap.data());
+            } catch {
+              // Students cannot read teacher profiles — safe to skip, decorative only.
+            }
+          }
+        } catch {
+          // Exam read failed (e.g. closed/draft status) — score & grade still show.
+        }
+      } catch (err) {
+        console.error('ResultCard load error:', err);
+      } finally {
+        setLoading(false); // ← ALWAYS runs, no matter what. Fixes infinite spinner.
       }
-      setLoading(false);
     })();
   }, [submissionId]);
 
