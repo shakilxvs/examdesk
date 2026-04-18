@@ -33,8 +33,13 @@ export default function ResultCard() {
       if (examSnap.exists()) {
         const examData = { id: examSnap.id, ...examSnap.data() };
         setExam(examData);
-        const tSnap = await getDoc(doc(db, 'teachers', examData.teacher_id));
-        if (tSnap.exists()) setTeacher(tSnap.data());
+        try {
+          const tSnap = await getDoc(doc(db, 'teachers', examData.teacher_id));
+          if (tSnap.exists()) setTeacher(tSnap.data());
+        } catch {
+          // Students can't read teacher profiles — safe to ignore,
+          // teacher name/school are decorative only.
+        }
       }
       setLoading(false);
     })();
