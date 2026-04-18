@@ -61,8 +61,13 @@ export default function ExamView() {
       const data = { id: snap.id, ...snap.data() };
       setExam(data);
       if (data.teacher_id) {
-        const ts = await getDoc(doc(db, 'teachers', data.teacher_id));
-        if (ts.exists()) setTeacher(ts.data());
+        try {
+          const ts = await getDoc(doc(db, 'teachers', data.teacher_id));
+          if (ts.exists()) setTeacher(ts.data());
+        } catch {
+          // Teacher profile not readable by students — safe to ignore,
+          // teacher name/school are just decorative on the exam cover page.
+        }
       }
       setLoading(false);
     }).catch(() => {
