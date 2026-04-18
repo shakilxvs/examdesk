@@ -7,7 +7,10 @@ import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import QuestionBuilder from '../components/QuestionBuilder';
 import Footer from '../components/Footer';
-import { ArrowLeft, ArrowRight, CheckCircle, Eye, Clock, Lock, Globe, AlignLeft, LayoutGrid, BookOpen, Send, Save } from 'lucide-react';
+import {
+  ArrowLeft, ArrowRight, CheckCircle, Eye, Clock, Lock, Globe,
+  AlignLeft, LayoutGrid, BookOpen, Send, Save, AlertTriangle
+} from 'lucide-react';
 import { generatePin } from '../utils/helpers';
 
 const STEPS = ['Setup', 'Questions', 'Review'];
@@ -28,7 +31,7 @@ const emptyExam = {
 };
 
 export default function ExamCreate() {
-  const { id } = useParams(); // for edit mode
+  const { id } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -38,6 +41,9 @@ export default function ExamCreate() {
   const [selectedRoom, setSelectedRoom] = useState(searchParams.get('room') || '');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  // BUG FIX #3: Added saveError state to show user-facing feedback when save fails.
+  // Previously the catch block only logged to console — user saw the spinner stop silently.
+  const [saveError, setSaveError] = useState('');
   const [preview, setPreview] = useState(false);
 
   const isEdit = !!id;
@@ -52,16 +58,26 @@ export default function ExamCreate() {
       });
   }, [user]);
 
+  // BUG FIX #7: Verify teacher ownership before loading exam in edit mode.
+  // Without this check, any authenticated teacher who guesses an exam's Firestore
+  // document ID could load it into the edit form and read all its contents.
   useEffect(() => {
-    if (!isEdit) return;
+    if (!isEdit || !user) return;
     getDoc(doc(db, 'exams', id)).then(snap => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setExam({ ...emptyExam, ...data });
-        setSelectedRoom(data.room_id || '');
+      if (!snap.exists()) {
+        navigate('/teacher/dashboard');
+        return;
       }
-    });
-  }, [id]);
+      const data = snap.data();
+      if (data.teacher_id !== user.uid) {
+        // Not your exam — redirect
+        navigate('/teacher/dashboard');
+        return;
+      }
+      setExam({ ...emptyExam, ...data });
+      setSelectedRoom(data.room_id || '');
+    }).catch(() => navigate('/teacher/dashboard'));
+  }, [id, user]);
 
   const set = (k, v) => setExam(e => ({ ...e, [k]: v }));
 
@@ -92,6 +108,8 @@ export default function ExamCreate() {
   };
 
   const handleSave = async (status) => {
+    if (!user) return;
+    setSaveError('');
     setLoading(true);
     try {
       const data = {
@@ -107,7 +125,9 @@ export default function ExamCreate() {
       }
       navigate(selectedRoom ? `/teacher/room/${selectedRoom}` : '/teacher/dashboard');
     } catch (err) {
-      console.error(err);
+      console.error('Save failed:', err);
+      // BUG FIX #3: Show user-facing error instead of silently logging.
+      setSaveError('Failed to save exam. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -154,6 +174,7 @@ export default function ExamCreate() {
       </div>
 
       <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+
         {/* ── STEP 0: Setup ── */}
         {step === 0 && (
           <div className="space-y-6 animate-fade-in">
@@ -192,13 +213,13 @@ export default function ExamCreate() {
               </Field>
             </div>
 
-            {/* Type */}
+            {/* Exam Type */}
             <div className="bg-white rounded-2xl border border-gray-100 p-6">
               <h2 className="font-display font-bold text-gray-900 text-lg mb-4">Exam Type</h2>
               <div className="grid grid-cols-3 gap-3">
                 {[
                   { v: 'mcq',   label: 'MCQ Only',  icon: CheckCircle, desc: 'Multiple choice' },
-                  { v: 'cq',    label: 'Written',   icon: AlignLeft,   desc: 'Free text answers' },
+                  { v: 'cq',    label: 'Written',    icon: AlignLeft,   desc: 'Free text answers' },
                   { v: 'mixed', label: 'Mixed',      icon: LayoutGrid,  desc: 'MCQ + Written' },
                 ].map(({ v, label, icon: Icon, desc }) => (
                   <button
@@ -260,13 +281,13 @@ export default function ExamCreate() {
               )}
             </div>
 
-            {/* Access */}
+            {/* Access Control */}
             <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
               <h2 className="font-display font-bold text-gray-900 text-lg">Access Control</h2>
 
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { v: 'open',          label: 'Open Access', icon: Globe, desc: 'Anyone with the link' },
+                  { v: 'open',          label: 'Open Access',   icon: Globe, desc: 'Anyone with the link' },
                   { v: 'pin_protected', label: 'PIN Protected', icon: Lock,  desc: 'Students need a PIN' },
                 ].map(({ v, label, icon: Icon, desc }) => (
                   <button
@@ -287,7 +308,8 @@ export default function ExamCreate() {
                 <Field label="Exam PIN" error={errors.pin} hint="4–6 digits">
                   <div className="flex gap-2">
                     <input
-                      type="text" value={exam.pin} onChange={e => set('pin', e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      type="text" value={exam.pin}
+                      onChange={e => set('pin', e.target.value.replace(/\D/g, '').slice(0, 6))}
                       placeholder="e.g. 1234"
                       className="input w-32 font-mono text-center tracking-widest"
                     />
@@ -311,12 +333,12 @@ export default function ExamCreate() {
               </div>
             </div>
 
-            {/* Grading */}
+            {/* Grading System */}
             <div className="bg-white rounded-2xl border border-gray-100 p-6">
               <h2 className="font-display font-bold text-gray-900 text-lg mb-4">Grading System</h2>
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  { v: 'bd',   label: 'Bangladeshi', desc: 'A+/A/A-/B/C/D/F' },
+                  { v: 'bd',   label: 'Bangladeshi',  desc: 'A+/A/A-/B/C/D/F' },
                   { v: 'intl', label: 'International', desc: 'A/B/C/D/F' },
                 ].map(({ v, label, desc }) => (
                   <button
@@ -341,7 +363,9 @@ export default function ExamCreate() {
           <div className="animate-fade-in space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-display font-bold text-gray-900 text-xl">Questions</h2>
-              <span className="text-sm text-gray-400">{exam.questions.length} question{exam.questions.length !== 1 ? 's' : ''} · {totalMarks} marks</span>
+              <span className="text-sm text-gray-400">
+                {exam.questions.length} question{exam.questions.length !== 1 ? 's' : ''} · {totalMarks} marks
+              </span>
             </div>
             {errors.questions && (
               <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">{errors.questions}</div>
@@ -360,14 +384,14 @@ export default function ExamCreate() {
             <h2 className="font-display font-bold text-gray-900 text-xl">Review & Publish</h2>
 
             <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-4">
-              <Row label="Title" value={exam.title} />
-              <Row label="Type" value={{ mcq: 'MCQ Only', cq: 'Written Only', mixed: 'Mixed' }[exam.type]} />
+              <Row label="Title"    value={exam.title} />
+              <Row label="Type"     value={{ mcq: 'MCQ Only', cq: 'Written Only', mixed: 'Mixed' }[exam.type]} />
               <Row label="Questions" value={`${exam.questions.length} questions · ${totalMarks} marks`} />
-              <Row label="Timed" value={exam.timed ? `Yes — ${exam.duration_minutes} min` : 'No'} />
-              <Row label="Access" value={exam.access === 'pin_protected' ? `PIN Protected (${exam.pin})` : 'Open'} />
+              <Row label="Timed"    value={exam.timed ? `Yes — ${exam.duration_minutes} min` : 'No'} />
+              <Row label="Access"   value={exam.access === 'pin_protected' ? `PIN Protected (${exam.pin})` : 'Open'} />
               <Row label="One-Time" value={exam.one_time_access ? 'Yes' : 'No'} />
-              <Row label="Grading" value={exam.grading_system === 'bd' ? 'Bangladeshi' : 'International'} />
-              <Row label="Display" value={{ one_at_a_time: 'One at a time', all_at_once: 'All at once' }[exam.display_mode]} />
+              <Row label="Grading"  value={exam.grading_system === 'bd' ? 'Bangladeshi' : 'International'} />
+              <Row label="Display"  value={{ one_at_a_time: 'One at a time', all_at_once: 'All at once' }[exam.display_mode]} />
             </div>
 
             {/* Question preview */}
@@ -395,6 +419,14 @@ export default function ExamCreate() {
                     <p className="text-xs text-gray-400 mt-2">{q.marks} mark{q.marks !== 1 ? 's' : ''}</p>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* BUG FIX #3: Show save error to the user above the action buttons */}
+            {saveError && (
+              <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                <AlertTriangle size={15} className="flex-shrink-0" />
+                {saveError}
               </div>
             )}
 
@@ -470,14 +502,19 @@ function Row({ label, value }) {
   );
 }
 
+// BUG FIX #9 (low): Replaced inline style transform with pure Tailwind classes.
+// The mixed paradigm (className transition + inline style transform) worked but was
+// inconsistent. Using translate-x-* classes is cleaner and more maintainable.
 function Toggle({ value, onChange }) {
   return (
     <button
       type="button"
       onClick={() => onChange(!value)}
-      className={`relative w-11 h-6 rounded-full transition-colors ${value ? 'bg-teal-500' : 'bg-gray-200'}`}
+      className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${value ? 'bg-teal-500' : 'bg-gray-200'}`}
     >
-      <span style={{ transform: value ? 'translateX(1.35rem)' : 'translateX(0.125rem)' }} className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform" />
+      <span
+        className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${value ? 'translate-x-5' : 'translate-x-0'}`}
+      />
     </button>
   );
 }
