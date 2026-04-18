@@ -259,7 +259,7 @@ export default function TeacherResults() {
                         <span className="text-xs text-gray-300">—</span>
                       )}
                     </div>
-                    <div className="col-span-1 flex items-center gap-1 text-xs text-gray-400">
+                    <div className="col-span-2 flex items-center gap-1 text-xs text-gray-400">
                       <span className="hidden lg:block">{formatDateTime(sub.submitted_at)?.split(',')[0]}</span>
                       {isOpen ? <ChevronUp size={14} className="ml-auto" /> : <ChevronDown size={14} className="ml-auto" />}
                     </div>
