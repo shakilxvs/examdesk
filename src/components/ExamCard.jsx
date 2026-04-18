@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MoreVertical, Pencil, Trash2, Share2, BarChart2, Clock, Shield, Users, Lock } from 'lucide-react';
+import { MoreVertical, Pencil, Trash2, Share2, BarChart2, Clock, Shield, Users, Lock, Hash } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { copyToClipboard, getExamLink } from '../utils/helpers';
 
@@ -18,6 +18,7 @@ const STATUS_STYLES = {
 export default function ExamCard({ exam, onEdit, onDelete }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const navigate = useNavigate();
 
   const type = TYPE_STYLES[exam.type] || TYPE_STYLES.mcq;
@@ -31,6 +32,16 @@ export default function ExamCard({ exam, onEdit, onDelete }) {
       await copyToClipboard(getExamLink(exam.id));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+
+  const handleCopyCode = async (e) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    try {
+      await copyToClipboard(exam.id);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
     } catch {}
   };
 
@@ -73,6 +84,12 @@ export default function ExamCard({ exam, onEdit, onDelete }) {
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
                 >
                   <Share2 size={14} /> {copied ? 'Copied!' : 'Copy Link'}
+                </button>
+                <button
+                  onClick={handleCopyCode}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <Hash size={14} /> {copiedCode ? 'Copied!' : 'Copy Code'}
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); setMenuOpen(false); navigate(`/teacher/exam/${exam.id}/results`); }}
