@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   collection, query, where, onSnapshot,
-  addDoc, updateDoc, deleteDoc, doc, serverTimestamp
+  addDoc, updateDoc, deleteDoc, getDocs, doc, serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -13,8 +13,7 @@ import ExamCard from '../components/ExamCard';
 import Modal from '../components/Modal';
 import Footer from '../components/Footer';
 import {
-  LayoutDashboard, Plus, LogOut, User, BookOpen,
-  FileText, Users, TrendingUp, CheckCircle
+  Plus, LogOut, BookOpen, FileText, Users, TrendingUp, CheckCircle, AlertTriangle
 } from 'lucide-react';
 
 export default function TeacherDashboard() {
@@ -32,6 +31,8 @@ export default function TeacherDashboard() {
   const [deleteExamTarget, setDeleteExamTarget] = useState(null);
 
   const [roomForm, setRoomForm] = useState({ name: '', subject: '', color_tag: 'teal' });
+  // BUG FIX #6: Added actionError state to show user-facing errors from all handlers
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -71,39 +72,73 @@ export default function TeacherDashboard() {
     ? Math.round(submissions.reduce((s, sub) => s + (sub.percentage || 0), 0) / submissions.length)
     : null;
 
+  // BUG FIX #6: All handlers now wrapped in try/catch with user-facing error feedback
   const handleCreateRoom = async () => {
     if (!roomForm.name.trim()) return;
-    await addDoc(collection(db, 'rooms'), {
-      teacher_id: user.uid,
-      name: roomForm.name.trim(),
-      subject: roomForm.subject.trim(),
-      color_tag: roomForm.color_tag,
-      created_at: serverTimestamp(),
-    });
-    setRoomForm({ name: '', subject: '', color_tag: 'teal' });
-    setNewRoomOpen(false);
+    setActionError('');
+    try {
+      await addDoc(collection(db, 'rooms'), {
+        teacher_id: user.uid,
+        name: roomForm.name.trim(),
+        subject: roomForm.subject.trim(),
+        color_tag: roomForm.color_tag,
+        created_at: serverTimestamp(),
+      });
+      setRoomForm({ name: '', subject: '', color_tag: 'teal' });
+      setNewRoomOpen(false);
+    } catch (err) {
+      console.error('Failed to create room:', err);
+      setActionError('Failed to create room. Please try again.');
+    }
   };
 
   const handleRenameRoom = async () => {
     if (!renameRoom || !roomForm.name.trim()) return;
-    await updateDoc(doc(db, 'rooms', renameRoom.id), {
-      name: roomForm.name.trim(),
-      subject: roomForm.subject.trim(),
-      color_tag: roomForm.color_tag,
-    });
-    setRenameRoom(null);
+    setActionError('');
+    try {
+      await updateDoc(doc(db, 'rooms', renameRoom.id), {
+        name: roomForm.name.trim(),
+        subject: roomForm.subject.trim(),
+        color_tag: roomForm.color_tag,
+      });
+      setRenameRoom(null);
+    } catch (err) {
+      console.error('Failed to rename room:', err);
+      setActionError('Failed to update room. Please try again.');
+    }
   };
 
   const handleDeleteRoom = async () => {
     if (!deleteRoomTarget) return;
-    await deleteDoc(doc(db, 'rooms', deleteRoomTarget.id));
-    setDeleteRoomTarget(null);
+    setActionError('');
+    try {
+      await deleteDoc(doc(db, 'rooms', deleteRoomTarget.id));
+      setDeleteRoomTarget(null);
+    } catch (err) {
+      console.error('Failed to delete room:', err);
+      setActionError('Failed to delete room. Please try again.');
+    }
   };
 
+  // BUG FIX #5: Delete exam now also deletes all associated submissions.
+  // Previously the modal said "All student submissions will also be removed"
+  // but only the exam document was being deleted — submissions were orphaned.
   const handleDeleteExam = async () => {
     if (!deleteExamTarget) return;
-    await deleteDoc(doc(db, 'exams', deleteExamTarget.id));
-    setDeleteExamTarget(null);
+    setActionError('');
+    try {
+      // First delete all associated submissions
+      const subsSnap = await getDocs(
+        query(collection(db, 'submissions'), where('exam_id', '==', deleteExamTarget.id))
+      );
+      await Promise.all(subsSnap.docs.map(d => deleteDoc(doc(db, 'submissions', d.id))));
+      // Then delete the exam itself
+      await deleteDoc(doc(db, 'exams', deleteExamTarget.id));
+      setDeleteExamTarget(null);
+    } catch (err) {
+      console.error('Failed to delete exam:', err);
+      setActionError('Failed to delete exam. Please try again.');
+    }
   };
 
   const initials = getInitials(teacher?.name || user?.email || 'T');
@@ -176,11 +211,13 @@ export default function TeacherDashboard() {
             {enrichedRooms.map(room => (
               <RoomCard
                 key={room.id} room={room}
-                onRename={(r) => { setRoomForm({ name: r.name, subject: r.subject || '', color_tag: r.color_tag || 'teal' }); setRenameRoom(r); }}
+                onRename={(r) => {
+                  setRoomForm({ name: r.name, subject: r.subject || '', color_tag: r.color_tag || 'teal' });
+                  setRenameRoom(r);
+                }}
                 onDelete={setDeleteRoomTarget}
               />
             ))}
-            {/* Dashed new room card */}
             <button
               onClick={() => { setRoomForm({ name: '', subject: '', color_tag: 'teal' }); setNewRoomOpen(true); }}
               className="border-2 border-dashed border-gray-200 rounded-2xl p-5 hover:border-teal-300 hover:bg-teal-50/30 transition-all group flex flex-col items-center justify-center gap-2 min-h-[140px]"
@@ -226,11 +263,16 @@ export default function TeacherDashboard() {
       {/* New/Edit Room Modal */}
       <Modal
         open={newRoomOpen || !!renameRoom}
-        onClose={() => { setNewRoomOpen(false); setRenameRoom(null); }}
+        onClose={() => { setNewRoomOpen(false); setRenameRoom(null); setActionError(''); }}
         title={renameRoom ? 'Edit Room' : 'New Room'}
         size="sm"
       >
         <div className="space-y-4">
+          {actionError && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-3 py-2.5">
+              <AlertTriangle size={14} /> {actionError}
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1.5">Room Name *</label>
             <input
@@ -264,7 +306,7 @@ export default function TeacherDashboard() {
           </div>
           <div className="flex gap-3 pt-2">
             <button
-              onClick={() => { setNewRoomOpen(false); setRenameRoom(null); }}
+              onClick={() => { setNewRoomOpen(false); setRenameRoom(null); setActionError(''); }}
               className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
             >
               Cancel
@@ -280,23 +322,33 @@ export default function TeacherDashboard() {
       </Modal>
 
       {/* Delete Room Confirm */}
-      <Modal open={!!deleteRoomTarget} onClose={() => setDeleteRoomTarget(null)} title="Delete Room" size="sm">
+      <Modal open={!!deleteRoomTarget} onClose={() => { setDeleteRoomTarget(null); setActionError(''); }} title="Delete Room" size="sm">
+        {actionError && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-3 py-2.5 mb-4">
+            <AlertTriangle size={14} /> {actionError}
+          </div>
+        )}
         <p className="text-sm text-gray-600 mb-5">
           Are you sure you want to delete <strong>{deleteRoomTarget?.name}</strong>? This won't delete exams inside it.
         </p>
         <div className="flex gap-3">
-          <button onClick={() => setDeleteRoomTarget(null)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
+          <button onClick={() => { setDeleteRoomTarget(null); setActionError(''); }} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
           <button onClick={handleDeleteRoom} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">Delete</button>
         </div>
       </Modal>
 
       {/* Delete Exam Confirm */}
-      <Modal open={!!deleteExamTarget} onClose={() => setDeleteExamTarget(null)} title="Delete Exam" size="sm">
+      <Modal open={!!deleteExamTarget} onClose={() => { setDeleteExamTarget(null); setActionError(''); }} title="Delete Exam" size="sm">
+        {actionError && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-3 py-2.5 mb-4">
+            <AlertTriangle size={14} /> {actionError}
+          </div>
+        )}
         <p className="text-sm text-gray-600 mb-5">
-          Delete <strong>{deleteExamTarget?.title}</strong>? All student submissions will also be removed.
+          Delete <strong>{deleteExamTarget?.title}</strong>? All student submissions will also be permanently removed.
         </p>
         <div className="flex gap-3">
-          <button onClick={() => setDeleteExamTarget(null)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
+          <button onClick={() => { setDeleteExamTarget(null); setActionError(''); }} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors">Cancel</button>
           <button onClick={handleDeleteExam} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors">Delete</button>
         </div>
       </Modal>
