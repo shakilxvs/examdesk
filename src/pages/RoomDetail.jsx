@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  doc, getDoc, collection, query, where, onSnapshot, deleteDoc
+  doc, getDoc, collection, query, where, onSnapshot,
+  deleteDoc, getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -9,7 +10,7 @@ import { getRoomColor, getExamLink, copyToClipboard } from '../utils/helpers';
 import ExamCard from '../components/ExamCard';
 import Modal from '../components/Modal';
 import Footer from '../components/Footer';
-import { ArrowLeft, Plus, CheckCircle, Share2 } from 'lucide-react';
+import { ArrowLeft, Plus, CheckCircle, AlertTriangle } from 'lucide-react';
 
 export default function RoomDetail() {
   const { id } = useParams();
@@ -20,6 +21,8 @@ export default function RoomDetail() {
   const [submissions, setSubmissions] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [toast, setToast] = useState('');
+  // BUG FIX #6: Added deleteError state for user-facing feedback
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     getDoc(doc(db, 'rooms', id)).then(snap => {
@@ -39,10 +42,24 @@ export default function RoomDetail() {
     return onSnapshot(q, snap => setSubmissions(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
   }, [user]);
 
+  // BUG FIX #5 + #6: Delete exam now also deletes all associated submissions (same
+  // fix as TeacherDashboard). Wrapped in try/catch with user-facing error feedback.
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    await deleteDoc(doc(db, 'exams', deleteTarget.id));
-    setDeleteTarget(null);
+    setDeleteError('');
+    try {
+      // Delete all submissions for this exam first
+      const subsSnap = await getDocs(
+        query(collection(db, 'submissions'), where('exam_id', '==', deleteTarget.id))
+      );
+      await Promise.all(subsSnap.docs.map(d => deleteDoc(doc(db, 'submissions', d.id))));
+      // Then delete the exam
+      await deleteDoc(doc(db, 'exams', deleteTarget.id));
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error('Failed to delete exam:', err);
+      setDeleteError('Failed to delete exam. Please try again.');
+    }
   };
 
   const showToast = (msg) => {
@@ -95,7 +112,7 @@ export default function RoomDetail() {
           </div>
         )}
 
-        {/* Exams */}
+        {/* Exams grid */}
         <section>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-display font-bold text-gray-900 text-xl">Exams</h2>
@@ -139,14 +156,34 @@ export default function RoomDetail() {
         <Plus size={24} />
       </button>
 
-      {/* Delete Confirm */}
-      <Modal open={!!deleteTarget} onClose={() => setDeleteTarget(null)} title="Delete Exam" size="sm">
+      {/* Delete Confirm Modal */}
+      <Modal
+        open={!!deleteTarget}
+        onClose={() => { setDeleteTarget(null); setDeleteError(''); }}
+        title="Delete Exam"
+        size="sm"
+      >
+        {deleteError && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-3 py-2.5 mb-4">
+            <AlertTriangle size={14} /> {deleteError}
+          </div>
+        )}
         <p className="text-sm text-gray-600 mb-5">
-          Delete <strong>{deleteTarget?.title}</strong>? All submissions will be lost.
+          Delete <strong>{deleteTarget?.title}</strong>? All submissions will be permanently removed.
         </p>
         <div className="flex gap-3">
-          <button onClick={() => setDeleteTarget(null)} className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50">Cancel</button>
-          <button onClick={handleDelete} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Delete</button>
+          <button
+            onClick={() => { setDeleteTarget(null); setDeleteError(''); }}
+            className="flex-1 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDelete}
+            className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold"
+          >
+            Delete
+          </button>
         </div>
       </Modal>
 
