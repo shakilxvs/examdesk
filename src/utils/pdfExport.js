@@ -103,8 +103,8 @@ export async function exportResultPDF(data) {
       const ans = answers[i];
       const isCorrect = ans?.correct;
 
-      doc.setFillColor(isCorrect ? 240, 253, 244 : 254, 242, 242);
-      doc.setDrawColor(isCorrect ? 187, 247, 208 : 254, 202, 202);
+if (isCorrect) { doc.setFillColor(240, 253, 244); doc.setDrawColor(187, 247, 208); }
+else { doc.setFillColor(254, 242, 242); doc.setDrawColor(254, 202, 202); }
       doc.roundedRect(14, y, W - 28, 14, 2, 2, 'FD');
 
       doc.setFont('helvetica', 'normal');
