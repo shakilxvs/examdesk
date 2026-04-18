@@ -8,6 +8,13 @@ export function useTimer(durationSeconds, onExpire) {
 
   useEffect(() => { onExpireRef.current = onExpire; }, [onExpire]);
 
+  // FIX: When exam loads asynchronously, durationSeconds changes from 0 to
+  // the real value. Since useState only takes the initial value once, we need
+  // to sync remaining whenever durationSeconds changes (while not yet running).
+  useEffect(() => {
+    if (!running) setRemaining(durationSeconds);
+  }, [durationSeconds]);
+
   const start = useCallback(() => setRunning(true), []);
   const pause = useCallback(() => setRunning(false), []);
   const reset = useCallback(() => {
