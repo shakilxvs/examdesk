@@ -33,13 +33,8 @@ export default function ResultCard() {
       if (examSnap.exists()) {
         const examData = { id: examSnap.id, ...examSnap.data() };
         setExam(examData);
-        try {
-          const tSnap = await getDoc(doc(db, 'teachers', examData.teacher_id));
-          if (tSnap.exists()) setTeacher(tSnap.data());
-        } catch {
-          // Students can't read teacher profiles — safe to ignore,
-          // teacher name/school are decorative only.
-        }
+        const tSnap = await getDoc(doc(db, 'teachers', examData.teacher_id));
+        if (tSnap.exists()) setTeacher(tSnap.data());
       }
       setLoading(false);
     })();
@@ -89,7 +84,22 @@ export default function ResultCard() {
   const handleImage = async () => {
     setExporting('img');
     try {
-      await exportResultImage('result-card', `ExamDesk_${submission.student_name?.replace(/\s+/g, '_')}`);
+      await exportResultImage('result-card', `ExamDesk_${submission.student_name?.replace(/\s+/g, '_')}`, {
+        examTitle: exam.title,
+        schoolName: teacher?.school,
+        teacherName: teacher?.name,
+        studentName: submission.student_name,
+        rollNo: submission.roll_no,
+        score: submission.score,
+        totalMarks: submission.total_marks,
+        percentage: submission.percentage,
+        grade: gradeObj.grade,
+        timeTaken: timeTakenStr,
+        submittedAt: submittedStr,
+        violations: submission.violations,
+        questions: exam.questions,
+        answers: submission.answers,
+      });
     } finally {
       setExporting('');
     }
